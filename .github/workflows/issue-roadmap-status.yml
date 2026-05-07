@@ -98,3 +98,4 @@ jobs:
             const message = `Issue #${issueNumber} is "${statusField.name}" in project "${projectItem.project.title}".`;
             core.info(message);
             console.log(message);
+            return;
