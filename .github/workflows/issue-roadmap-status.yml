@@ -14,7 +14,7 @@ jobs:
   report-roadmap-status:
     runs-on: ubuntu-latest
     env:
-      ROADMAP_PROJECT_TITLE: Roadmap
+      ROADMAP_PROJECT_TITLE: dontcloseroadmap
       ROADMAP_STATUS_FIELD_NAME: Status
     steps:
       - name: Print and restore roadmap status
