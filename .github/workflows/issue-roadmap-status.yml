@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
   issues: read
-  repository-projects: read
+  repository-projects: write
 
 jobs:
   report-roadmap-status:
@@ -17,10 +17,10 @@ jobs:
       ROADMAP_PROJECT_TITLE: Roadmap
       ROADMAP_STATUS_FIELD_NAME: Status
     steps:
-      - name: Print roadmap status
+      - name: Print and restore roadmap status
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.PROJECT_READ_TOKEN || github.token }}
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.PROJECT_READ_TOKEN || github.token }}
           script: |
             const issueNumber = context.payload.issue?.number;
             const projectTitle = process.env.ROADMAP_PROJECT_TITLE;
@@ -37,7 +37,9 @@ jobs:
                   issue(number: $issueNumber) {
                     projectItems(first: 20) {
                       nodes {
+                        id
                         project {
+                          id
                           title
                           number
                         }
@@ -45,8 +47,10 @@ jobs:
                           nodes {
                             ... on ProjectV2ItemFieldSingleSelectValue {
                               name
+                              optionId
                               field {
                                 ... on ProjectV2SingleSelectField {
+                                  id
                                   name
                                 }
                               }
@@ -98,4 +102,43 @@ jobs:
             const message = `Issue #${issueNumber} is "${statusField.name}" in project "${projectItem.project.title}".`;
             core.info(message);
             console.log(message);
-            return;
+
+            if (!projectItem.id || !projectItem.project?.id || !statusField.field?.id || !statusField.optionId) {
+              core.warning(
+                `Issue #${issueNumber} could not be moved back to "${statusField.name}" because project metadata is incomplete.`,
+              );
+              return;
+            }
+
+            const mutation = `
+              mutation(
+                $projectId: ID!
+                $itemId: ID!
+                $fieldId: ID!
+                $singleSelectOptionId: String!
+              ) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: { singleSelectOptionId: $singleSelectOptionId }
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }
+            `;
+
+            await github.graphql(mutation, {
+              projectId: projectItem.project.id,
+              itemId: projectItem.id,
+              fieldId: statusField.field.id,
+              singleSelectOptionId: statusField.optionId,
+            });
+
+            const restoreMessage = `Issue #${issueNumber} was moved back to "${statusField.name}" in project "${projectItem.project.title}".`;
+            core.info(restoreMessage);
+            console.log(restoreMessage);
