@@ -1,0 +1,100 @@
+name: Issue roadmap status
+
+on:
+  issues:
+    types:
+      - closed
+
+permissions:
+  contents: read
+  issues: read
+  repository-projects: read
+
+jobs:
+  report-roadmap-status:
+    runs-on: ubuntu-latest
+    env:
+      ROADMAP_PROJECT_TITLE: Roadmap
+      ROADMAP_STATUS_FIELD_NAME: Status
+    steps:
+      - name: Print roadmap status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_READ_TOKEN != '' && secrets.PROJECT_READ_TOKEN || github.token }}
+          script: |
+            const issueNumber = context.payload.issue?.number;
+            const projectTitle = process.env.ROADMAP_PROJECT_TITLE;
+            const statusFieldName = process.env.ROADMAP_STATUS_FIELD_NAME;
+
+            if (!issueNumber) {
+              core.setFailed('No issue number was found in the event payload.');
+              return;
+            }
+
+            const query = `
+              query($owner: String!, $repo: String!, $issueNumber: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $issueNumber) {
+                    projectItems(first: 20) {
+                      nodes {
+                        project {
+                          title
+                          number
+                        }
+                        fieldValues(first: 20) {
+                          nodes {
+                            ... on ProjectV2ItemFieldSingleSelectValue {
+                              name
+                              field {
+                                ... on ProjectV2SingleSelectField {
+                                  name
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const response = await github.graphql(query, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issueNumber,
+            });
+
+            const items = response.repository?.issue?.projectItems?.nodes ?? [];
+
+            if (items.length === 0) {
+              core.warning(`Issue #${issueNumber} is not added to any project.`);
+              return;
+            }
+
+            const normalizedProjectTitle = projectTitle.toLowerCase();
+            const projectItem =
+              items.find((item) => item.project?.title === projectTitle) ??
+              items.find((item) => item.project?.title?.toLowerCase() === normalizedProjectTitle) ??
+              items.find((item) => item.project?.title?.toLowerCase().includes(normalizedProjectTitle));
+
+            if (!projectItem) {
+              core.warning(`Issue #${issueNumber} is not in a project titled "${projectTitle}".`);
+              return;
+            }
+
+            const statusField = projectItem.fieldValues.nodes.find(
+              (fieldValue) => fieldValue.field?.name === statusFieldName && fieldValue.name,
+            );
+
+            if (!statusField) {
+              core.warning(
+                `Issue #${issueNumber} is in project "${projectItem.project.title}" but has no "${statusFieldName}" value.`,
+              );
+              return;
+            }
+
+            const message = `Issue #${issueNumber} is "${statusField.name}" in project "${projectItem.project.title}".`;
+            core.info(message);
+            console.log(message);
